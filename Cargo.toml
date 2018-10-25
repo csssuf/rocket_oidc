@@ -1,0 +1,16 @@
+[package]
+name = "rocket_oidc"
+version = "0.1.0"
+authors = ["James Forcier <csssuf@csssuf.net>"]
+edition = "2018"
+
+[dependencies]
+failure = "0.1"
+openidconnect = { git = "https://github.com/csssuf/openidconnect-rs", branch = "ring-0.11" }
+oauth2 = { git = "https://github.com/ramosbugs/oauth2-rs.git", branch = "master" }
+rocket = "0.3.17"
+rocket_codegen = "0.3.17"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+url = "1.0"
