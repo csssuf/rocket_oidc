@@ -31,6 +31,13 @@ impl OidcUser {
 
         Ok(OidcUser { preferred_username, name })
     }
+
+    pub fn name(&self) -> Option<String> {
+        match &self.name {
+            Some(name_map) => name_map.get(&None).map(|name| name.as_str().to_owned()),
+            None => None
+        }
+    }
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for OidcUser {
