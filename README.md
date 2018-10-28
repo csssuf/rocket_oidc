@@ -21,8 +21,7 @@ fn authed_user(user: OidcUser) -> String {
 }
 
 #[get("/", rank = 2)]
-fn user(mut cookies: Cookies) -> Redirect {
-    cookies.add_private(Cookie::new("oidc_redirect_destination", "/"));
+fn user() -> Redirect {
     Redirect::to("/oidc_goto_auth")
 }
 

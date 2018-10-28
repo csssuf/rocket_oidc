@@ -32,7 +32,10 @@ pub(crate) fn oidc_redirect(mut cookies: Cookies, oidc: State<OidcApplication>, 
     cookies.add_private(Cookie::new("oidc_user_session", serde_json::to_string(&cookie)?));
 
     match cookies.get_private("oidc_redirect_destination") {
-        Some(redirect_destination) => Ok(Redirect::to(redirect_destination.value())),
+        Some(redirect_destination) => {
+            cookies.remove_private(Cookie::named("oidc_redirect_destination"));
+            Ok(Redirect::to(redirect_destination.value()))
+        }
         None => Ok(Redirect::to("/")),
     }
 }

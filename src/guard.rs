@@ -6,7 +6,7 @@ use openidconnect::{
     EndUserName, EndUserUsername, LanguageTag, StandardClaims,
 };
 use rocket::{
-    http::Status,
+    http::{Cookie, Status},
     request::{self, FromRequest, Request},
     Outcome, State,
 };
@@ -44,22 +44,32 @@ impl<'a, 'r> FromRequest<'a, 'r> for OidcUser {
     type Error = ();
 
     fn from_request(request: &'a Request<'r>) -> request::Outcome<OidcUser, ()> {
-        if let Some(serialized_session) = request.cookies().get_private("oidc_user_session") {
+        let mut cookies = request.cookies();
+
+        if let Some(serialized_session) = cookies.get_private("oidc_user_session") {
             if let Ok(oidc_session) = serde_json::from_str::<OidcSessionCookie>(serialized_session.value()) {
                 let oidc = request.guard::<State<OidcApplication>>()?;
 
                 match OidcUser::load_from_session(&oidc, &oidc_session) {
                     Ok(user) => Outcome::Success(user),
                     Err(_) => {
-                        request.cookies().remove_private(serialized_session);
+                        cookies.remove_private(serialized_session);
                         Outcome::Failure((Status::UnprocessableEntity, ()))
                     }
                 }
             } else {
-                request.cookies().remove_private(serialized_session);
+                cookies.remove_private(serialized_session);
+                cookies.add_private(Cookie::new(
+                    "oidc_redirect_destination",
+                    request.uri().to_string(),
+                ));
                 Outcome::Forward(())
             }
         } else {
+            cookies.add_private(Cookie::new(
+                "oidc_redirect_destination",
+                request.uri().to_string(),
+            ));
             Outcome::Forward(())
         }
     }
