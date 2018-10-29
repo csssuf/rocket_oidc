@@ -13,6 +13,11 @@ use rocket::{
 
 use crate::application::{OidcApplication, OidcSessionCookie};
 
+/// Rocket request guard for OpenID Connect authentication.
+///
+/// Provides basic information about the authenticated user. This guard can be used as a building
+/// block for more complex request guards requiring authorization information provided by OpenID
+/// Connect.
 pub struct OidcUser {
     pub preferred_username: Option<EndUserUsername>,
     pub name: Option<HashMap<Option<LanguageTag>, EndUserName>>,
@@ -32,6 +37,11 @@ impl OidcUser {
         Ok(OidcUser { preferred_username, name })
     }
 
+    /// Retrieve the default-language name for this user.
+    ///
+    /// OpenID Connect provides a mapping of language to full name for users; while comprehensive,
+    /// this approach can be overly complicated for many applications. This function provides
+    /// simpler access to the `None`-language name.
     pub fn name(&self) -> Option<String> {
         match &self.name {
             Some(name_map) => name_map.get(&None).map(|name| name.as_str().to_owned()),
