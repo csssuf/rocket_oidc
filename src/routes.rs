@@ -1,12 +1,24 @@
-use failure::Error;
 use oauth2::{
-    prelude::*,
     AuthorizationCode,
 };
+use openidconnect::{
+    OAuth2TokenResponse,
+    TokenResponse
+};
 use rocket::{
-    http::{Cookie, Cookies},
-    response::Redirect,
+    http::{
+        Cookie, 
+        CookieJar,
+        Status,
+        SameSite
+    },
+    response::{
+        Redirect,
+        status::Custom,
+    },
     State,
+    FromForm,
+    get
 };
 
 use crate::application::{OidcApplication, OidcSessionCookie};
@@ -19,28 +31,42 @@ pub(crate) struct OidcParams {
     session_state: String,
 }
 
-#[get("/oidc_redirect?<params>")]
-pub(crate) fn oidc_redirect(mut cookies: Cookies, oidc: State<OidcApplication>, params: OidcParams) -> Result<Redirect, Error> {
-    let code = AuthorizationCode::new(params.code);
-    let token_response = oidc.client.exchange_code(code)?;
-
-    let cookie = OidcSessionCookie {
-        access_token: token_response.access_token().clone(),
-        id_token: token_response.extra_fields().id_token().clone(),
+#[get("/oidc_redirect?<state>&<session_state>&<code>")]
+pub(crate) async fn oidc_redirect(cookies: &CookieJar<'_>, oidc: &State<OidcApplication>, state: String, session_state: String, code:String) -> Result<Redirect, Custom<String>> {
+    let params = OidcParams{
+        code,
+        state,
+        session_state
     };
 
-    cookies.add_private(Cookie::new("oidc_user_session", serde_json::to_string(&cookie)?));
+    let code = AuthorizationCode::new(params.code);
+    let token_response = oidc.client.exchange_code(code).request_async(oauth2::reqwest::async_http_client).await
+        .map_err(|_|Custom(Status::InternalServerError, "Could not get Token response".to_string()))?;
 
-    match cookies.get_private("oidc_redirect_destination") {
-        Some(redirect_destination) => {
+    let access_token = token_response.access_token();
+    let id_token = token_response.id_token();
+
+    if let Some(id_token) = id_token{
+        let cookie = OidcSessionCookie {
+            access_token: access_token.clone(),
+            id_token: id_token.clone(),
+        };
+
+        let serialized_cookie = serde_json::to_string(&cookie)
+            .map_err(|_|Custom(Status::InternalServerError, "Could not set Cookie".to_string()))?;
+    
+        cookies.add_private(Cookie::build("oidc_user_session", serialized_cookie).same_site(SameSite::Lax).finish());
+
+        if let Some(redirect_destination)  = cookies.get_private("oidc_redirect_destination"){
             cookies.remove_private(Cookie::named("oidc_redirect_destination"));
-            Ok(Redirect::to(redirect_destination.value()))
+            return Ok(Redirect::to(redirect_destination.value().to_string()));
         }
-        None => Ok(Redirect::to("/")),
     }
+    
+    Ok(Redirect::to("/"))
 }
 
 #[get("/oidc_goto_auth")]
-pub(crate) fn oidc_goto_auth(oidc: State<OidcApplication>) -> Redirect {
-    Redirect::to(oidc.authorize_url.as_str())
+pub(crate) fn oidc_goto_auth(oidc: &State<OidcApplication>) -> Redirect {
+    Redirect::to(oidc.authorize_url.to_string())
 }

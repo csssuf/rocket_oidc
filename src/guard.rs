@@ -1,14 +1,11 @@
-use std::collections::HashMap;
-
 use failure::Error;
 use openidconnect::{
     core,
-    EndUserName, EndUserUsername, LanguageTag, StandardClaims,
+    EndUserName, EndUserUsername, LocalizedClaim,
 };
 use rocket::{
-    http::{Cookie, Status},
-    request::{self, FromRequest, Request},
-    Outcome, State,
+    http::{Cookie, Status, SameSite},
+    request::{self, FromRequest, Request, Outcome},
 };
 
 use crate::application::{OidcApplication, OidcSessionCookie};
@@ -20,7 +17,7 @@ use crate::application::{OidcApplication, OidcSessionCookie};
 /// Connect.
 pub struct OidcUser {
     pub preferred_username: Option<EndUserUsername>,
-    pub name: Option<HashMap<Option<LanguageTag>, EndUserName>>,
+    pub name: Option<LocalizedClaim<EndUserName>>,
 }
 
 impl OidcUser {
@@ -28,7 +25,7 @@ impl OidcUser {
         oidc: &OidcApplication,
         oidc_session: &OidcSessionCookie
     ) -> Result<OidcUser, Error> {
-        let id_token_verifier: core::CoreIdTokenVerifier = oidc.client.id_token_verifier()?;
+        let id_token_verifier: core::CoreIdTokenVerifier = oidc.client.id_token_verifier();
         let id_token_claims = oidc_session.id_token.claims(&id_token_verifier, &oidc.nonce)?;
 
         let preferred_username = id_token_claims.preferred_username().cloned();
@@ -44,42 +41,42 @@ impl OidcUser {
     /// simpler access to the `None`-language name.
     pub fn name(&self) -> Option<String> {
         match &self.name {
-            Some(name_map) => name_map.get(&None).map(|name| name.as_str().to_owned()),
+            Some(name_map) => name_map.get(None).map(|name| name.as_str().to_owned()),
             None => None
         }
     }
 }
 
-impl<'a, 'r> FromRequest<'a, 'r> for OidcUser {
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for OidcUser {
     type Error = ();
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<OidcUser, ()> {
-        let mut cookies = request.cookies();
+    async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
+        let cookies = request.cookies();
 
         if let Some(serialized_session) = cookies.get_private("oidc_user_session") {
             if let Ok(oidc_session) = serde_json::from_str::<OidcSessionCookie>(serialized_session.value()) {
-                let oidc = request.guard::<State<OidcApplication>>()?;
-
-                match OidcUser::load_from_session(&oidc, &oidc_session) {
-                    Ok(user) => Outcome::Success(user),
-                    Err(_) => {
-                        cookies.remove_private(serialized_session);
-                        Outcome::Failure((Status::UnprocessableEntity, ()))
+                let oidc = request.rocket().state::<OidcApplication>();
+                if let Some(oidc) = oidc{
+                    match OidcUser::load_from_session(&oidc, &oidc_session) {
+                        Ok(user) => Outcome::Success(user),
+                        Err(_) => {
+                            cookies.remove_private(serialized_session);
+                            Outcome::Failure((Status::UnprocessableEntity, ()))
+                        }
                     }
+                }else{
+                    Outcome::Forward(())
                 }
             } else {
                 cookies.remove_private(serialized_session);
-                cookies.add_private(Cookie::new(
-                    "oidc_redirect_destination",
-                    request.uri().to_string(),
-                ));
+                cookies.add_private(Cookie::build("oidc_redirect_destination", request.uri().to_string()).same_site(SameSite::Lax).finish());
+                
                 Outcome::Forward(())
             }
         } else {
-            cookies.add_private(Cookie::new(
-                "oidc_redirect_destination",
-                request.uri().to_string(),
-            ));
+            cookies.add_private(Cookie::build("oidc_redirect_destination", request.uri().to_string()).same_site(SameSite::Lax).finish());
+
             Outcome::Forward(())
         }
     }
